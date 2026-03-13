@@ -11,10 +11,25 @@ import { openClaimModal } from "./claimModal.js";
  * @param {string} localUserId
  */
 export function renderGameBoard(container, state, localUserId) {
-  const { players = [], currentTurnPlayerId, status } = state;
+  const { players = [], currentTurnPlayerId, isSpectating = false } = state;
   const localPlayer = players.find(p => p.id === localUserId);
   const isMyTurn = currentTurnPlayerId === localUserId;
   const hand = localPlayer?.hand ?? [];
+
+  if (isSpectating) {
+    container.innerHTML = `
+      <div class="game-board spectator-mode">
+        <div id="player-list-container" class="player-list-area"></div>
+        <div id="event-log-container" class="event-log-area"></div>
+        <div class="spectator-banner">
+          👁 You are spectating — sit back and enjoy!
+        </div>
+      </div>
+    `;
+    renderPlayerList(container.querySelector('#player-list-container'), state, localUserId);
+    renderEventLog(container.querySelector('#event-log-container'), state, localUserId);
+    return;
+  }
 
   container.innerHTML = `
     <div class="game-board">

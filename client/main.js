@@ -20,6 +20,11 @@ if (!urlParams.get('frame_id')) {
   throw new Error('Not running inside Discord — frame_id query param is missing.');
 }
 
+// Detect if this client wants to spectate instead of play.
+// A ?spectate=1 query param triggers spectator mode. The server will also
+// auto-spectate any user who joins a game that is already in progress.
+const wantsSpectate = urlParams.get('spectate') === '1';
+
 const discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
 
 let localUser = null;
@@ -42,7 +47,7 @@ onStateChange((state) => {
   if (!localUser) return;
 
   if (state.status === 'lobby') {
-    renderLobby(appEl, state, localUser.id);
+    renderLobby(appEl, state, localUser);
   } else if (state.status === 'playing') {
     renderGameBoard(appEl, state, localUser.id);
   } else if (state.status === 'finished') {
@@ -90,6 +95,7 @@ function setupSocket(instanceId) {
         userId: localUser.id,
         username: localUser.username,
         avatarUrl: localUser.avatarUrl,
+        spectate: wantsSpectate,
       });
     }
   });

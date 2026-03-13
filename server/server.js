@@ -8,6 +8,9 @@ import { getOrCreateGame, getGame, deleteGame } from "./game/gameManager.js";
 import {
   joinGame,
   removePlayer,
+  addSpectator,
+  removeSpectator,
+  getSpectatorState,
   startGame,
   validateAsk,
   processAsk,
@@ -65,6 +68,11 @@ function broadcastGameState(instanceId, gameState) {
     if (player.isBot) continue; // bots have no socket
     const publicState = getPublicState(gameState, player.id);
     io.to(`player:${player.id}:${instanceId}`).emit("game-state", publicState);
+  }
+  // Spectators get a hand-stripped view
+  if (gameState.spectators.length > 0) {
+    const spectatorState = getSpectatorState(gameState);
+    io.to(`spectators:${instanceId}`).emit("game-state", spectatorState);
   }
   // After every state change, schedule a bot move if it's a bot's turn
   scheduleBotTurn(instanceId);
@@ -149,13 +157,24 @@ function executeBotTurn(instanceId, botId) {
   broadcastGameState(instanceId, game);
 }
 
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+/** Adds one bot to a lobby game and returns the bot player object. */
+function addBotToGame(game) {
+  const existingBots = game.players.filter(p => p.isBot);
+  const botName = getNextBotName(existingBots);
+  const botId = `bot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  joinGame(game, { id: botId, username: botName, avatarUrl: null, isBot: true });
+  return game.players.find(p => p.id === botId);
+}
+
 // ─── Socket.io event handlers ─────────────────────────────────────────────────
 
 io.on("connection", (socket) => {
   console.log(`[Socket] Client connected: ${socket.id}`);
 
   // ── join-game ──────────────────────────────────────────────────────────────
-  socket.on("join-game", ({ instanceId, userId, username, avatarUrl }) => {
+  socket.on("join-game", ({ instanceId, userId, username, avatarUrl, spectate = false }) => {
     if (!instanceId || !userId) {
       socket.emit("error", { message: "instanceId and userId are required.", code: "BAD_REQUEST" });
       return;
@@ -163,18 +182,36 @@ io.on("connection", (socket) => {
 
     const game = getOrCreateGame(instanceId);
 
-    // Track this socket's identity for later use
     socket.instanceId = instanceId;
     socket.userId = userId;
+    socket.username = username;
+    socket.avatarUrl = avatarUrl;
 
-    // Join rooms: instance room (public) and private per-player room
+    // ── Spectator path ────────────────────────────────────────────────────────
+    // Spectate if explicitly requested, or if the game is in-progress/finished
+    // and this user isn't already a registered player.
+    const isExistingPlayer = game.players.find(p => p.id === userId);
+    const forceSpectate = !isExistingPlayer && (game.status === "playing" || game.status === "finished");
+
+    if (spectate || forceSpectate) {
+      socket.isSpectator = true;
+      socket.join(instanceId);
+      socket.join(`spectators:${instanceId}`);
+      addSpectator(game, { id: userId, username, avatarUrl });
+      console.log(`[Game ${instanceId}] ${username} joined as spectator (${game.spectators.length} watching)`);
+      socket.emit("game-state", getSpectatorState(game));
+      // Notify players that spectator count changed
+      broadcastGameState(instanceId, game);
+      return;
+    }
+
+    // ── Player path ───────────────────────────────────────────────────────────
     socket.join(instanceId);
     socket.join(`player:${userId}:${instanceId}`);
 
     // If game is already playing and player is rejoining, just resend state
     if (game.status === "playing" || game.status === "finished") {
-      const existingPlayer = game.players.find(p => p.id === userId);
-      if (existingPlayer) {
+      if (isExistingPlayer) {
         const publicState = getPublicState(game, userId);
         socket.emit("game-state", publicState);
         return;
@@ -302,12 +339,8 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const existingBots = game.players.filter(p => p.isBot);
-    const botName = getNextBotName(existingBots);
-    const botId = `bot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-
-    joinGame(game, { id: botId, username: botName, avatarUrl: null, isBot: true });
-    console.log(`[Game ${instanceId}] Bot added: ${botName}`);
+    addBotToGame(game);
+    console.log(`[Game ${instanceId}] Bot added (${game.players.length} players)`);
     broadcastGameState(instanceId, game);
   });
 
@@ -332,6 +365,47 @@ io.on("connection", (socket) => {
     broadcastGameState(instanceId, game);
   });
 
+  // ── spectate-bot-game ─────────────────────────────────────────────────────
+  // Removes the requesting user from the player list, fills remaining slots
+  // with bots (up to 6), starts the game, and switches the user to spectator.
+  socket.on("spectate-bot-game", ({ instanceId }) => {
+    const { userId, username, avatarUrl } = socket;
+    const game = getGame(instanceId);
+    if (!game) {
+      socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
+      return;
+    }
+    if (game.status !== "lobby") {
+      socket.emit("error", { message: "Game already started.", code: "INVALID_STATE" });
+      return;
+    }
+
+    // Remove the human from the player list so all seats go to bots
+    removePlayer(game, userId);
+
+    // Fill up to exactly 6 bots (minimum needed to start)
+    while (game.players.length < 6) {
+      addBotToGame(game);
+    }
+
+    try {
+      startGame(game);
+    } catch (err) {
+      socket.emit("error", { message: err.message, code: "VALIDATION" });
+      return;
+    }
+
+    // Switch socket to spectator mode
+    socket.isSpectator = true;
+    socket.join(`spectators:${instanceId}`);
+    addSpectator(game, { id: userId, username, avatarUrl });
+
+    console.log(`[Game ${instanceId}] Bot-only game started; ${username} is spectating`);
+    socket.emit("game-state", getSpectatorState(game));
+    // Notify any other sockets in the room (e.g. reconnecting sessions)
+    broadcastGameState(instanceId, game);
+  });
+
   // ── request-state ─────────────────────────────────────────────────────────
   socket.on("request-state", ({ instanceId }) => {
     const userId = socket.userId;
@@ -340,8 +414,11 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
       return;
     }
-    const publicState = getPublicState(game, userId);
-    socket.emit("game-state", publicState);
+    if (socket.isSpectator) {
+      socket.emit("game-state", getSpectatorState(game));
+    } else {
+      socket.emit("game-state", getPublicState(game, userId));
+    }
   });
 
   // ── disconnect ────────────────────────────────────────────────────────────
@@ -353,6 +430,12 @@ io.on("connection", (socket) => {
 
     const game = getGame(instanceId);
     if (!game) return;
+
+    if (socket.isSpectator) {
+      removeSpectator(game, userId);
+      broadcastGameState(instanceId, game);
+      return;
+    }
 
     if (game.status === "lobby") {
       removePlayer(game, userId);

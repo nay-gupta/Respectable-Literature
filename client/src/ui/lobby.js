@@ -4,16 +4,34 @@ import { emit } from "../socket.js";
  * Renders the lobby screen into the given container.
  * @param {HTMLElement} container
  * @param {object} state - Current game state
- * @param {string} localUserId - The current user's Discord userId
+ * @param {object|string} localUserOrId - The current user object {id,username,avatarUrl} or just userId string
  */
-export function renderLobby(container, state, localUserId) {
-  const { players = [], instanceId } = state;
+export function renderLobby(container, state, localUserOrId) {
+  // Accept either the full localUser object or a bare id string (backwards-compat)
+  const localUser = typeof localUserOrId === 'string'
+    ? { id: localUserOrId, username: '', avatarUrl: null }
+    : localUserOrId;
+  const localUserId = localUser.id;
+
+  const { players = [], spectators = [], instanceId } = state;
   const isHost = players.length > 0 && players[0].id === localUserId;
+  const isPlayer = players.some(p => p.id === localUserId);
   const canStart = players.length === 6 || players.length === 8;
 
   const teamA = players.filter(p => p.teamIndex === 0);
   const teamB = players.filter(p => p.teamIndex === 1);
   const unassigned = players.filter(p => p.teamIndex === null || p.teamIndex === undefined);
+
+  const spectatorsHtml = spectators.length > 0
+    ? `<ul class="spectator-list">${spectators.map(s => `
+        <li class="spectator-item">
+          ${s.avatarUrl
+            ? `<img src="${s.avatarUrl}" class="player-avatar-sm" alt="${s.username}" />`
+            : `<div class="player-avatar-sm avatar-placeholder">${s.username[0].toUpperCase()}</div>`}
+          <span>${s.username}${s.id === localUserId ? ' <span class="you-badge">(you)</span>' : ''}</span>
+        </li>`).join('')}
+      </ul>`
+    : `<p class="spectators-empty">No spectators yet</p>`;
 
   container.innerHTML = `
     <div class="lobby">
@@ -55,13 +73,34 @@ export function renderLobby(container, state, localUserId) {
           <button id="start-game-btn" class="btn btn-primary ${canStart ? '' : 'disabled'}" ${canStart ? '' : 'disabled'}>
             ▶ Start Game
           </button>
+          <button id="watch-bots-btn" class="btn btn-ghost">
+            👁 Watch Bots Play
+          </button>
         </div>
         ${!canStart ? `<p class="lobby-hint">Need exactly 6 or 8 players to start. ${players.length < 6 ? `Add ${6 - players.length} more.` : players.length === 7 ? 'Add 1 more.' : ''}</p>` : ''}
+      ` : !isPlayer ? `
+        <div class="lobby-actions">
+          <button id="join-as-spectator-btn" class="btn btn-ghost">
+            👁 Watch as Spectator
+          </button>
+          <button id="watch-bots-btn" class="btn btn-ghost">
+            👁 Watch Bots Play
+          </button>
+        </div>
+        <p class="lobby-hint">The game hasn't started yet. You can watch as a spectator, or ask the host to save you a seat.</p>
       ` : `
         <div class="lobby-actions">
           <p class="lobby-waiting">Waiting for the host to start the game…</p>
+          <button id="watch-bots-btn" class="btn btn-ghost">
+            👁 Watch Bots Play
+          </button>
         </div>
       `}
+
+      <div class="spectators-section">
+        <h4 class="spectators-heading">👁 Spectators (${spectators.length})</h4>
+        ${spectatorsHtml}
+      </div>
     </div>
   `;
 
@@ -85,6 +124,20 @@ export function renderLobby(container, state, localUserId) {
       });
     });
   }
+
+  container.querySelector('#join-as-spectator-btn')?.addEventListener('click', () => {
+    emit('join-game', {
+      instanceId,
+      userId: localUser.id,
+      username: localUser.username,
+      avatarUrl: localUser.avatarUrl,
+      spectate: true,
+    });
+  });
+
+  container.querySelector('#watch-bots-btn')?.addEventListener('click', () => {
+    emit('spectate-bot-game', { instanceId });
+  });
 }
 
 function playerItemHtml(player, localUserId, isHost = false) {

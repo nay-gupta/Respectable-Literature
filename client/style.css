@@ -207,6 +207,62 @@ html, body {
 }
 .remove-bot-btn:hover { color: var(--team-b); opacity: 1; }
 
+/* Spectator sections */
+.spectators-section {
+  margin-top: 20px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.spectators-heading {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+.spectator-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.spectator-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border-radius: 20px;
+  padding: 3px 10px 3px 4px;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+.spectators-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* Spectator banner (in-game) */
+.spectator-banner {
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* When watching, event log fills remaining space */
+.spectator-mode .event-log-area {
+  border-bottom: none;
+}
+
 /* Game Board */
 .game-board {
   display: flex;

@@ -8,6 +8,7 @@ export function createGame(instanceId) {
     instanceId,
     status: 'lobby',
     players: [],
+    spectators: [],
     teams: [[], []],
     currentTurnPlayerId: null,
     lastQuestion: null,
@@ -53,6 +54,35 @@ export function removePlayer(gameState, playerId) {
   gameState.teams[0] = gameState.teams[0].filter(id => id !== playerId);
   gameState.teams[1] = gameState.teams[1].filter(id => id !== playerId);
   return gameState;
+}
+
+/**
+ * Adds a spectator. No-ops if already watching.
+ */
+export function addSpectator(gameState, { id, username, avatarUrl }) {
+  if (gameState.spectators.find(s => s.id === id)) return gameState;
+  gameState.spectators.push({ id, username, avatarUrl });
+  return gameState;
+}
+
+/**
+ * Removes a spectator by id.
+ */
+export function removeSpectator(gameState, spectatorId) {
+  gameState.spectators = gameState.spectators.filter(s => s.id !== spectatorId);
+  return gameState;
+}
+
+/**
+ * Returns a state object safe to send to a spectator:
+ * all player hands are stripped; isSpectating flag is set.
+ */
+export function getSpectatorState(gameState) {
+  return {
+    ...gameState,
+    isSpectating: true,
+    players: gameState.players.map(({ hand: _hand, ...rest }) => rest),
+  };
 }
 
 /**
@@ -334,11 +364,37 @@ export function advanceTurn(gameState, toPlayerId = null) {
 
 /**
  * Checks if the game is over. Returns { gameOver, winner }.
- * Game ends when all 8 half-suits are claimed.
+ *
+ * Win condition: a team wins when it has clinched a majority — meaning the
+ * opposing team cannot reach the same score even if they won every remaining
+ * unresolved set (including sets that might be cancelled via wrong_location).
+ *
+ * Formula: scores[i] > scores[1-i] + remaining  →  team i has won.
+ *
+ * This handles the subtle case where wrong_location claims remove sets from
+ * play without awarding points: those cancelled sets reduce `remaining`,
+ * making it easier for one team to clinch earlier than the raw set count
+ * might suggest.
  */
 export function checkEndgame(gameState) {
-  if (gameState.claimedHalfSuits.length === 8) {
-    return { gameOver: true, winner: gameState.scores[0] > gameState.scores[1] ? 0 : gameState.scores[1] > gameState.scores[0] ? 1 : null };
+  const TOTAL_SETS = 8;
+  const claimed = gameState.claimedHalfSuits.length;
+  const remaining = TOTAL_SETS - claimed;
+
+  // Early-win: trailing team cannot catch up even if they took every remaining set
+  if (gameState.scores[0] > gameState.scores[1] + remaining) {
+    return { gameOver: true, winner: 0 };
+  }
+  if (gameState.scores[1] > gameState.scores[0] + remaining) {
+    return { gameOver: true, winner: 1 };
+  }
+
+  // All sets resolved — determine winner by score (tie = null)
+  if (claimed === TOTAL_SETS) {
+    const winner = gameState.scores[0] > gameState.scores[1] ? 0
+                 : gameState.scores[1] > gameState.scores[0] ? 1
+                 : null;
+    return { gameOver: true, winner };
   }
 
   // Check if one team has run out of cards (forced claim scenario)
