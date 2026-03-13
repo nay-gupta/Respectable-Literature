@@ -32,7 +32,7 @@ export function renderGameBoard(container, state, localUserId) {
     </div>
   `;
 
-  renderPlayerList(container.querySelector('#player-list-container'), state);
+  renderPlayerList(container.querySelector('#player-list-container'), state, localUserId);
   renderEventLog(container.querySelector('#event-log-container'), state, localUserId);
   renderHand(container.querySelector('#hand-container'), hand);
 
