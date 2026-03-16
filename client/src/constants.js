@@ -9,6 +9,15 @@ export const HALF_SUIT_NAMES = {
   highC: 'High ♣',
 };
 
+export const EMOTES = {
+  'middle-finger': { label: 'Middle Finger', emoji: '🖕' },
+  'wet':           { label: 'Wet',           emoji: '💦' },
+  'lip-bite':      { label: 'Lip Bite',      emoji: '😏' },
+  'yacht-flip':    { label: 'Yacht Flip',    emoji: '🛥️🥞' },
+};
+
+export const VALID_EMOTE_IDS = Object.keys(EMOTES);
+
 export const HALF_SUITS = {
   lowS:  ['2S', '3S', '4S', '5S', '6S', '7S'],
   highS: ['9S', '10S', 'JS', 'QS', 'KS', 'AS'],

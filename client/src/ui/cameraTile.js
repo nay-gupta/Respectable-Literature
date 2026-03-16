@@ -1,3 +1,5 @@
+import { EMOTES } from '../constants.js';
+
 /**
  * Returns the HTML string for a single camera tile.
  *
@@ -43,4 +45,26 @@ export function cameraTileHtml(player, opts = {}) {
       <div class="tile-name">${player.username}${youTag}</div>
     </div>
   `;
+}
+
+/**
+ * Shows an animated emote overlay on the camera tile for a given player.
+ * @param {string} playerId
+ * @param {string} emoteId
+ */
+export function showEmote(playerId, emoteId) {
+  const emote = EMOTES[emoteId];
+  if (!emote) return;
+
+  const tile = document.querySelector(`.camera-tile[data-player-id="${playerId}"] .tile-frame`);
+  if (!tile) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = emoteId === 'yacht-flip' ? 'emote-overlay emote-yacht-flip' : 'emote-overlay';
+  overlay.textContent = emote.emoji;
+  tile.appendChild(overlay);
+
+  overlay.addEventListener('animationend', () => overlay.remove());
+  // Fallback removal
+  setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 2500);
 }

@@ -657,6 +657,30 @@ io.on("connection", (socket) => {
     broadcastGameState(instanceId, game);
   });
 
+  // ── send-emote ─────────────────────────────────────────────────────────────
+  const VALID_EMOTE_IDS = ['middle-finger', 'wet', 'lip-bite', 'yacht-flip'];
+  const emoteLastSent = new Map(); // `${userId}:${instanceId}` -> timestamp
+
+  socket.on("send-emote", ({ instanceId, emoteId }) => {
+    const userId = socket.userId;
+    const game = getGame(instanceId);
+    if (!game || game.status !== "playing") return;
+    if (!VALID_EMOTE_IDS.includes(emoteId)) return;
+
+    // Check player is in the game
+    const isPlayer = game.players.some(p => p.id === userId);
+    if (!isPlayer) return;
+
+    // Rate-limit: 3 seconds per player per game
+    const key = `${userId}:${instanceId}`;
+    const now = Date.now();
+    const last = emoteLastSent.get(key) || 0;
+    if (now - last < 3000) return;
+    emoteLastSent.set(key, now);
+
+    io.to(instanceId).emit("emote", { playerId: userId, emoteId });
+  });
+
   // ── kick-player ────────────────────────────────────────────────────────────
   socket.on("kick-player", ({ instanceId, targetId }) => {
     const game = getGame(instanceId);

@@ -1,11 +1,12 @@
 import socket from "../socket.js";
 import { renderHandTray }    from "./handTray.js";
 import { renderEventLog }    from "./eventLog.js";
-import { cameraTileHtml }    from "./cameraTile.js";
+import { cameraTileHtml, showEmote } from "./cameraTile.js";
 import { renderTableCenter } from "./tableCenter.js";
 import { animateCardTransfer, animateCardShake } from "./cardAnimation.js";
 import { openAskModal }   from "./askModal.js";
 import { openClaimModal } from "./claimModal.js";
+import { EMOTES }         from "../constants.js";
 
 // ─── Module-level state (survives re-renders) ──────────────────────────────
 
@@ -15,6 +16,8 @@ let lastLogLength  = 0;
 let _animHandlersRegistered = false;
 let _timerInterval = null;
 let _inGameSettingsPanelOpen = false;
+let _emoteCooldown = false;
+let _emotePickerOpen = false;
 
 // The log panel, backdrop, and toggle button live on document.body so they
 // are NEVER destroyed by container.innerHTML re-renders. Created once, reused forever.
@@ -71,6 +74,9 @@ function registerAnimHandlers() {
   socket.on('ask-result', ({ success, askerId, targetId, card }) => {
     if (success) animateCardTransfer(targetId, askerId, card);
     else         animateCardShake(targetId);
+  });
+  socket.on('emote', ({ playerId, emoteId }) => {
+    showEmote(playerId, emoteId);
   });
 }
 
@@ -192,6 +198,9 @@ export function renderGameBoard(container, state, localUserId) {
                   ${isMyTurn ? '' : 'disabled'}>
             \ud83c\udccf Claim
           </button>
+          <div class="emote-picker-wrap">
+            <button id="emote-btn" class="btn btn-ghost${_emoteCooldown ? ' disabled' : ''}" ${_emoteCooldown ? 'disabled' : ''}>😀</button>
+          </div>
           ${isHost ? `<button id="end-game-btn" class="btn btn-ghost end-game-btn" title="You are the host">👑 End Game</button>` : ''}
         </div>
       ` : `
@@ -293,5 +302,48 @@ export function renderGameBoard(container, state, localUserId) {
   });
   container.querySelector('#end-game-btn')?.addEventListener('click', () => {
     socket.emit('end-game', { instanceId: state.instanceId });
+  });
+
+  // ── Emote picker ───────────────────────────────────────────────────────
+  const emoteBtn = container.querySelector('#emote-btn');
+  emoteBtn?.addEventListener('click', () => {
+    if (_emoteCooldown) return;
+    const wrap = emoteBtn.closest('.emote-picker-wrap');
+    const existing = wrap.querySelector('.emote-picker');
+    if (existing) { existing.remove(); _emotePickerOpen = false; return; }
+
+    _emotePickerOpen = true;
+    const picker = document.createElement('div');
+    picker.className = 'emote-picker';
+    for (const [id, { emoji }] of Object.entries(EMOTES)) {
+      const btn = document.createElement('button');
+      btn.textContent = emoji;
+      btn.title = id;
+      btn.addEventListener('click', () => {
+        socket.emit('send-emote', { instanceId: state.instanceId, emoteId: id });
+        picker.remove();
+        _emotePickerOpen = false;
+        _emoteCooldown = true;
+        emoteBtn.classList.add('disabled');
+        emoteBtn.disabled = true;
+        setTimeout(() => {
+          _emoteCooldown = false;
+          const btn2 = document.querySelector('#emote-btn');
+          if (btn2) { btn2.classList.remove('disabled'); btn2.disabled = false; }
+        }, 3000);
+      });
+      picker.appendChild(btn);
+    }
+    wrap.appendChild(picker);
+
+    // Close picker on outside click
+    const closeOnOutside = (e) => {
+      if (!wrap.contains(e.target)) {
+        picker.remove();
+        _emotePickerOpen = false;
+        document.removeEventListener('click', closeOnOutside, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeOnOutside, true), 0);
   });
 }
