@@ -49,6 +49,8 @@ export function cameraTileHtml(player, opts = {}) {
 
 /**
  * Shows an animated emote overlay on the camera tile for a given player.
+ * The overlay is appended to document.body and positioned absolutely over
+ * the tile so it survives game-board re-renders.
  * @param {string} playerId
  * @param {string} emoteId
  */
@@ -59,12 +61,21 @@ export function showEmote(playerId, emoteId) {
   const tile = document.querySelector(`.camera-tile[data-player-id="${playerId}"] .tile-frame`);
   if (!tile) return;
 
+  const rect = tile.getBoundingClientRect();
+
   const overlay = document.createElement('div');
   overlay.className = emoteId === 'yacht-flip' ? 'emote-overlay emote-yacht-flip' : 'emote-overlay';
   overlay.textContent = emote.emoji;
-  tile.appendChild(overlay);
+
+  // Position fixed over the tile so it persists through innerHTML re-renders
+  overlay.style.position = 'fixed';
+  overlay.style.left = `${rect.left}px`;
+  overlay.style.top = `${rect.top}px`;
+  overlay.style.width = `${rect.width}px`;
+  overlay.style.height = `${rect.height}px`;
+
+  document.body.appendChild(overlay);
 
   overlay.addEventListener('animationend', () => overlay.remove());
-  // Fallback removal
   setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 2500);
 }

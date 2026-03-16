@@ -701,14 +701,13 @@ html, body {
 
 /* ── Emote overlay ──────────────────────────────────────────────────────── */
 .emote-overlay {
-  position: absolute;
-  inset: 0;
+  position: fixed;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 30px;
   pointer-events: none;
-  z-index: 50;
+  z-index: 500;
   animation: emotePopUp 2s ease-out forwards;
 }
 
