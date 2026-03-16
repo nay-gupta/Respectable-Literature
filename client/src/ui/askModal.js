@@ -4,10 +4,11 @@ import { HALF_SUIT_NAMES } from "../constants.js";
 
 /**
  * Opens the Ask Card modal (three-step flow).
- * @param {object} state - Current game state
- * @param {string} localUserId
+ * @param {object}      state               - Current game state
+ * @param {string}      localUserId
+ * @param {object|null} preselectedOpponent - If provided, jumps straight to step 2
  */
-export function openAskModal(state, localUserId) {
+export function openAskModal(state, localUserId, preselectedOpponent = null) {
   const { players = [], teams = [[], []], instanceId } = state;
   const localPlayer = players.find(p => p.id === localUserId);
   if (!localPlayer) return;
@@ -21,11 +22,19 @@ export function openAskModal(state, localUserId) {
   // Half-suits the local player holds at least one card in
   const availableHalfSuits = [...new Set(hand.map(c => getHalfSuitId(c)).filter(Boolean))];
 
-  let selectedOpponent = null;
+  let selectedOpponent = preselectedOpponent ?? null;
   let selectedHalfSuit = null;
 
   const modal = createModal();
   document.body.appendChild(modal);
+
+  // If an opponent was pre-selected (via camera-tile click), skip step 1
+  if (preselectedOpponent) {
+    renderStep2();
+  } else {
+    renderStep1();
+  }
+  setupModalClose(modal);
 
   function renderStep1() {
     modal.querySelector('.modal-body').innerHTML = `
@@ -105,9 +114,6 @@ export function openAskModal(state, localUserId) {
     });
     modal.querySelector('.modal-back-btn').addEventListener('click', renderStep2);
   }
-
-  renderStep1();
-  setupModalClose(modal);
 }
 
 function getCardsInHalfSuit(hsId) {
