@@ -32,7 +32,7 @@ export async function animateCardTransfer(fromPlayerId, toPlayerId, card) {
     top:  ${startY}px;
     z-index: 9999;
     pointer-events: none;
-    transition: transform 0.5s cubic-bezier(0.25,0.8,0.25,1), opacity 0.2s;
+    transition: transform 0.9s cubic-bezier(0.25,0.8,0.25,1), opacity 0.2s;
     will-change: transform;
   `;
   document.body.appendChild(el);
@@ -46,7 +46,7 @@ export async function animateCardTransfer(fromPlayerId, toPlayerId, card) {
 
   await new Promise(r => {
     el.addEventListener('transitionend', r, { once: true });
-    setTimeout(r, 700); // safety fallback
+    setTimeout(r, 1200); // safety fallback
   });
 
   el.style.opacity = '0';

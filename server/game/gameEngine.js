@@ -7,6 +7,7 @@ export function createGame(instanceId) {
   return {
     instanceId,
     status: 'lobby',
+    hostUserId: null,
     players: [],
     spectators: [],
     teams: [[], []],
@@ -19,6 +20,13 @@ export function createGame(instanceId) {
     createdAt: Date.now(),
     startedAt: null,
     finishedAt: null,
+    settings: {
+      botDifficulty:   'easy',
+      botSpeed:        'slow',
+      turnTimeLimit:   0,
+      allowSpectators: true,
+      teamsLocked:     false,
+    },
   };
 }
 
@@ -112,7 +120,20 @@ export function startGame(gameState) {
     throw new Error(`Need exactly 6 or 8 players to start (have ${count})`);
   }
 
-  assignTeams(gameState);
+  if (!gameState.settings?.teamsLocked) {
+    assignTeams(gameState);
+  } else {
+    // When teams are locked, verify everyone is assigned and teams are equal
+    const unassigned = gameState.players.filter(p => p.teamIndex !== 0 && p.teamIndex !== 1);
+    if (unassigned.length > 0) {
+      throw new Error(`${unassigned.length} player(s) are not assigned to a team.`);
+    }
+    const teamA = gameState.players.filter(p => p.teamIndex === 0).length;
+    const teamB = gameState.players.filter(p => p.teamIndex === 1).length;
+    if (teamA !== teamB) {
+      throw new Error(`Teams must be equal size (${teamA}v${teamB}).`);
+    }
+  }
 
   const hands = dealCards(count);
   gameState.players.forEach((player, i) => {

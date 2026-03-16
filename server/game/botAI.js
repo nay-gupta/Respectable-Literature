@@ -15,21 +15,29 @@ export function getNextBotName(existingBots) {
  * Determines the best move for a bot.
  * Returns { type: 'ask', targetId, card } or { type: 'claim', halfSuit, cardMap }, or null.
  *
- * Strategy:
- *  1. If the bot's team holds all 6 cards of any unclaimed half-suit, claim it immediately.
- *  2. Otherwise, randomly ask a valid opponent for a card in a half-suit the bot holds.
+ * Easy strategy:
+ *  1. Claim if the bot's team holds all 6 cards of any unclaimed half-suit.
+ *  2. Otherwise randomly ask a valid opponent for a card in a half-suit the bot holds.
+ *
+ * Hard strategy:
+ *  Same claim logic, but when asking it prefers cards in half-suits where the team already
+ *  holds 4 or 5 of 6 (close to completing), and targets the opponent most likely to have
+ *  the card (picks the opponent with the most cards first).
  */
 export function getBotMove(gameState, botId) {
   const bot = gameState.players.find(p => p.id === botId);
   if (!bot) return null;
 
-  // Bots with no cards can't ask, but can still attempt a claim
+  const difficulty = gameState.settings?.botDifficulty ?? 'easy';
+
   const claimMove = tryClaimMove(gameState, bot);
   if (claimMove) return claimMove;
 
   if (bot.hand.length === 0) return null;
 
-  return tryAskMove(gameState, bot);
+  return difficulty === 'hard'
+    ? tryAskMoveHard(gameState, bot)
+    : tryAskMove(gameState, bot);
 }
 
 function tryClaimMove(gameState, bot) {
@@ -76,4 +84,41 @@ function tryAskMove(gameState, bot) {
 
   if (candidates.length === 0) return null;
   return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+function tryAskMoveHard(gameState, bot) {
+  const opponents = gameState.players.filter(p =>
+    p.teamIndex !== bot.teamIndex && p.cardCount > 0
+  );
+  if (opponents.length === 0) return null;
+
+  // Sort opponents descending by card count — pick the one most likely to have what we want
+  const sortedOpponents = [...opponents].sort((a, b) => b.cardCount - a.cardCount);
+
+  const teamPlayers = gameState.players.filter(p =>
+    gameState.teams[bot.teamIndex].includes(p.id)
+  );
+  const teamCards = teamPlayers.flatMap(p => p.hand);
+
+  const heldHalfSuits = [...new Set(bot.hand.map(c => getHalfSuit(c)).filter(Boolean))];
+
+  // Score each half-suit by how many cards the team already holds (higher = closer to claim)
+  const hsWithScore = heldHalfSuits.map(hs => {
+    const allCards = HALF_SUITS[hs];
+    const heldCount = allCards.filter(c => teamCards.includes(c)).length;
+    return { hs, heldCount, askable: allCards.filter(c => !teamCards.includes(c)) };
+  }).filter(x => x.askable.length > 0);
+
+  if (hsWithScore.length === 0) return null;
+
+  // Pick the half-suit where the team holds the most cards
+  hsWithScore.sort((a, b) => b.heldCount - a.heldCount);
+  const best = hsWithScore[0];
+
+  // Pick the first askable card and the opponent with the most cards
+  return {
+    type: 'ask',
+    card: best.askable[0],
+    targetId: sortedOpponents[0].id,
+  };
 }

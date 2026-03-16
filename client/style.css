@@ -140,9 +140,14 @@ html, body {
 
 .team-a { border-top: 3px solid var(--team-a); }
 .team-b { border-top: 3px solid var(--team-b); }
-.team-label { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.team-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.team-label { font-size: 14px; font-weight: 700; margin-bottom: 0; }
 .team-a .team-label { color: var(--team-a-light); }
 .team-b .team-label { color: var(--team-b-light); }
+.join-team-btn { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-muted); cursor: pointer; }
+.join-team-btn:hover { background: var(--team-a); color: #fff; border-color: var(--team-a); }
+.team-b .join-team-btn:hover { background: var(--team-b); border-color: var(--team-b); }
+.team-joined-badge { font-size: 11px; color: var(--text-muted); }
 
 .player-list-lobby { list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .player-item-lobby { display: flex; align-items: center; gap: 8px; font-size: 13px; }
@@ -207,7 +212,93 @@ html, body {
 }
 .remove-bot-btn:hover { color: var(--team-b); opacity: 1; }
 
-/* Spectator sections */
+/* Generic small icon buttons on player rows */
+.player-row-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.5;
+  line-height: 1;
+  margin-left: 2px;
+}
+.player-row-btn:hover { opacity: 1; background: var(--bg-elevated); }
+
+/* Watch-self button is always fully visible — it's an action the user needs to find */
+.watch-self-btn.player-row-btn {
+  opacity: 1;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+/* ── Settings panel ─────────────────────────────────────────────────────── */
+.settings-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+.settings-summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+  list-style: none;
+}
+.settings-summary::-webkit-details-marker { display: none; }
+.settings-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-normal);
+}
+.btn-group { display: flex; gap: 4px; }
+.setting-btn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.1s, color 0.1s;
+}
+.setting-btn.active { background: var(--team-a); color: #fff; border-color: var(--team-a); }
+.setting-btn:hover:not(.active) { border-color: var(--text-muted); color: var(--text); }
+.setting-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--team-a); }
+
+/* Unassigned / Spectator sections */
+.unassigned-section {
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.unassigned-heading {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
 .spectators-section {
   margin-top: 20px;
   padding: 12px 16px;
@@ -286,7 +377,23 @@ html, body {
   overflow: hidden;
 }
 
-/* Log toggle sits at the far left — flex-shrink:0 so it never collapses */
+/* Left group: log button + scores */
+.header-left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+/* Right group: spectator chip etc., mirrors left for true centering */
+.header-right {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+/* Log toggle sits in header-left — flex-shrink:0 so it never collapses */
 .game-header .log-toggle-btn {
   flex-shrink: 0;
 }
@@ -299,10 +406,9 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Turn label takes the remaining space and truncates if needed */
+/* Turn label is in the center flex slot — no need for absolute positioning */
 .header-turn {
-  flex: 1;
-  min-width: 0;
+  flex: 0 0 auto;
   font-size: 12px;
   color: var(--text-muted);
   text-align: center;
@@ -310,6 +416,9 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+.end-game-btn { margin-left: auto; font-size: 11px; opacity: 0.6; }
+.end-game-btn:hover { opacity: 1; color: #e55; border-color: #e55; }
 
 .log-toggle-btn {
   background: none;
@@ -1014,6 +1123,7 @@ html, body {
 .result-score-divider { font-size: 36px; color: var(--text-muted); font-weight: 300; }
 
 .waiting-text { color: var(--text-muted); font-style: italic; font-size: 13px; }
+.results-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 
 
 /* Toast */

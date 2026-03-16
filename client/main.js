@@ -123,6 +123,16 @@ function setupSocket(instanceId) {
     showToast(`⚠️ ${message}`);
   });
 
+  socket.on("kicked", ({ reason }) => {
+    console.warn("[Socket] Kicked:", reason);
+    appEl.innerHTML = `
+      <div class="loading-screen" style="text-align:center;padding:32px">
+        <h2 style="font-size:20px;margin-bottom:12px">Removed from game</h2>
+        <p style="color:var(--text-muted)">${reason ?? 'You were removed by the host.'}</p>
+      </div>
+    `;
+  });
+
   socket.on("disconnect", (reason) => {
     console.warn("[Socket] Disconnected:", reason);
     showToast("Connection lost. Reconnecting…");

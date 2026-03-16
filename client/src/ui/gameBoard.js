@@ -75,7 +75,7 @@ function registerAnimHandlers() {
 // ─── Seat geometry ─────────────────────────────────────────────────────────
 
 function computeSeatPositions(N) {
-  const CX = 50, CY = 47, RX = 37, RY = 32;
+  const CX = 50, CY = 50, RX = 37, RY = 32;
   return Array.from({ length: N }, (_, i) => {
     const angle = Math.PI / 2 - (2 * Math.PI * i / N);
     return {
@@ -95,11 +95,12 @@ export function renderGameBoard(container, state, localUserId) {
     players = [], currentTurnPlayerId,
     isSpectating = false, spectators = [],
     scores = [0, 0], claimedHalfSuits = [],
-    eventLog = [],
+    eventLog = [], hostUserId = null,
   } = state;
 
   const localPlayer = players.find(p => p.id === localUserId);
   const isMyTurn    = currentTurnPlayerId === localUserId;
+  const isHost      = hostUserId ? hostUserId === localUserId : false;
   const hand        = localPlayer?.hand ?? [];
 
   // ── Unread tracking ────────────────────────────────────────────────────
@@ -132,13 +133,17 @@ export function renderGameBoard(container, state, localUserId) {
     <div class="game-board${isSpectating ? ' spectator-mode' : ''}">
 
       <div class="game-header">
-        <div class="header-scores">
-          <span class="score-chip score-chip-a">${scores[0]}</span>
-          <span class="score-sep">\u2013</span>
-          <span class="score-chip score-chip-b">${scores[1]}</span>
+        <div class="header-left">
+          <div class="header-scores">
+            <span class="score-chip score-chip-a">${scores[0]}</span>
+            <span class="score-sep">\u2013</span>
+            <span class="score-chip score-chip-b">${scores[1]}</span>
+          </div>
         </div>
         <div class="header-turn">${turnLabel}</div>
-        ${spectators.length > 0 ? `<div class="spectator-count-chip">\ud83d\udc41 ${spectators.length}</div>` : ''}
+        <div class="header-right">
+          ${spectators.length > 0 ? `<div class="spectator-count-chip">\ud83d\udc41 ${spectators.length}</div>` : ''}
+        </div>
       </div>
 
       <div class="table-wrapper">
@@ -174,6 +179,7 @@ export function renderGameBoard(container, state, localUserId) {
                   ${isMyTurn ? '' : 'disabled'}>
             \ud83c\udccf Claim
           </button>
+          ${isHost ? `<button id="end-game-btn" class="btn btn-ghost end-game-btn">⏹ End Game</button>` : ''}
         </div>
       ` : `
         <div class="spectator-banner">\ud83d\udc41 You are spectating \u2014 sit back and enjoy!</div>
@@ -182,10 +188,10 @@ export function renderGameBoard(container, state, localUserId) {
   `;
 
   // ── Sub-components ─────────────────────────────────────────────────────
-  // Re-insert the persistent toggle button as the first item in the header.
+  // Re-insert the persistent toggle button as the first item in header-left.
   // Moving an existing DOM node preserves its event listeners.
-  const header = container.querySelector('.game-header');
-  if (header && _toggleBtn) header.insertBefore(_toggleBtn, header.firstChild);
+  const headerLeft = container.querySelector('.header-left');
+  if (headerLeft && _toggleBtn) headerLeft.insertBefore(_toggleBtn, headerLeft.firstChild);
 
   renderTableCenter(container.querySelector('#table-center'), claimedHalfSuits);
   if (!isSpectating) renderHandTray(container.querySelector('#hand-tray-area'), hand);
@@ -207,5 +213,8 @@ export function renderGameBoard(container, state, localUserId) {
   });
   container.querySelector('#claim-btn')?.addEventListener('click', () => {
     if (isMyTurn) openClaimModal(state, localUserId);
+  });
+  container.querySelector('#end-game-btn')?.addEventListener('click', () => {
+    socket.emit('end-game', { instanceId: state.instanceId });
   });
 }

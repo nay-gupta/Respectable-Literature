@@ -11,6 +11,7 @@ import {
   addSpectator,
   removeSpectator,
   getSpectatorState,
+  assignTeams,
   startGame,
   validateAsk,
   processAsk,
@@ -95,8 +96,11 @@ function scheduleBotTurn(instanceId) {
   const current = game.players.find(p => p.id === game.currentTurnPlayerId);
   if (!current?.isBot) return;
 
-  // Add a realistic thinking delay (1.2 – 2.2 s)
-  const delay = 1200 + Math.random() * 1000;
+  const delay = (() => {
+    const game = getGame(instanceId);
+    const fast = game?.settings?.botSpeed === 'fast';
+    return fast ? 300 + Math.random() * 300 : 1200 + Math.random() * 1000;
+  })();
   const timeout = setTimeout(() => {
     botTimeouts.delete(instanceId);
     executeBotTurn(instanceId, current.id);
@@ -165,7 +169,15 @@ function addBotToGame(game) {
   const botName = getNextBotName(existingBots);
   const botId = `bot_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   joinGame(game, { id: botId, username: botName, avatarUrl: null, isBot: true });
-  return game.players.find(p => p.id === botId);
+  const bot = game.players.find(p => p.id === botId);
+  // Auto-assign to the team with fewer players (balance teams)
+  const teamACount = game.players.filter(p => p.teamIndex === 0).length;
+  const teamBCount = game.players.filter(p => p.teamIndex === 1).length;
+  const teamIndex = teamACount <= teamBCount ? 0 : 1;
+  bot.teamIndex = teamIndex;
+  if (!game.teams[teamIndex]) game.teams[teamIndex] = [];
+  game.teams[teamIndex].push(botId);
+  return bot;
 }
 
 // ─── Socket.io event handlers ─────────────────────────────────────────────────
@@ -194,6 +206,10 @@ io.on("connection", (socket) => {
     const forceSpectate = !isExistingPlayer && (game.status === "playing" || game.status === "finished");
 
     if (spectate || forceSpectate) {
+      if (!game.settings?.allowSpectators && !forceSpectate) {
+        socket.emit("error", { message: "Spectators are not allowed in this game.", code: "FORBIDDEN" });
+        return;
+      }
       socket.isSpectator = true;
       socket.join(instanceId);
       socket.join(`spectators:${instanceId}`);
@@ -220,6 +236,11 @@ io.on("connection", (socket) => {
 
     joinGame(game, { id: userId, username, avatarUrl });
 
+    // Set hostUserId to the first human who joins
+    if (!game.hostUserId) {
+      game.hostUserId = userId;
+    }
+
     console.log(`[Game ${instanceId}] ${username} joined (${game.players.length} players)`);
     broadcastGameState(instanceId, game);
   });
@@ -233,6 +254,10 @@ io.on("connection", (socket) => {
     }
     if (game.status !== "lobby") {
       socket.emit("error", { message: "Game already started.", code: "INVALID_STATE" });
+      return;
+    }
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can start the game.", code: "FORBIDDEN" });
       return;
     }
 
@@ -334,6 +359,10 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Can only add bots in the lobby.", code: "INVALID_STATE" });
       return;
     }
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can add bots.", code: "FORBIDDEN" });
+      return;
+    }
     if (game.players.length >= 8) {
       socket.emit("error", { message: "Game is full (max 8 players).", code: "VALIDATION" });
       return;
@@ -355,6 +384,10 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Can only remove bots in the lobby.", code: "INVALID_STATE" });
       return;
     }
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can remove bots.", code: "FORBIDDEN" });
+      return;
+    }
     const bot = game.players.find(p => p.id === botId && p.isBot);
     if (!bot) {
       socket.emit("error", { message: "Bot not found.", code: "NOT_FOUND" });
@@ -365,9 +398,227 @@ io.on("connection", (socket) => {
     broadcastGameState(instanceId, game);
   });
 
-  // ── spectate-bot-game ─────────────────────────────────────────────────────
-  // Removes the requesting user from the player list, fills remaining slots
-  // with bots (up to 6), starts the game, and switches the user to spectator.
+  // ── lobby-spectate ─────────────────────────────────────────────────────────
+  // Moves the requesting player from the player list to spectators (in the lobby).
+  // The host keeps their hostUserId so they can still start the game.
+  socket.on("lobby-spectate", ({ instanceId }) => {
+    const { userId, username, avatarUrl } = socket;
+    const game = getGame(instanceId);
+    if (!game || game.status !== "lobby") return;
+
+    const isPlayer = game.players.find(p => p.id === userId);
+    if (!isPlayer) return; // already not a player
+
+    removePlayer(game, userId);
+    addSpectator(game, { id: userId, username, avatarUrl });
+
+    socket.leave(`player:${userId}:${instanceId}`);
+    socket.join(`spectators:${instanceId}`);
+    socket.isSpectator = true;
+
+    broadcastGameState(instanceId, game);
+    // Resend lobby state with isSpectating so the client updates its view
+    socket.emit("game-state", { ...game, isSpectating: true });
+    console.log(`[Game ${instanceId}] ${username} moved to spectators in lobby`);
+  });
+
+  // ── lobby-rejoin ───────────────────────────────────────────────────────────
+  // Moves the requesting user back from spectators to the player list (lobby only).
+  socket.on("lobby-rejoin", ({ instanceId }) => {
+    const { userId, username, avatarUrl } = socket;
+    const game = getGame(instanceId);
+    if (!game || game.status !== "lobby") return;
+    if (game.players.length >= 8) {
+      socket.emit("error", { message: "Game is full.", code: "VALIDATION" });
+      return;
+    }
+
+    removeSpectator(game, userId);
+    joinGame(game, { id: userId, username, avatarUrl });
+
+    socket.leave(`spectators:${instanceId}`);
+    socket.join(`player:${userId}:${instanceId}`);
+    socket.isSpectator = false;
+
+    broadcastGameState(instanceId, game);
+    console.log(`[Game ${instanceId}] ${username} rejoined as player from spectators`);
+  });
+
+  // ── shuffle-teams ──────────────────────────────────────────────────────────
+  socket.on("shuffle-teams", ({ instanceId }) => {
+    const game = getGame(instanceId);
+    if (!game || game.status !== "lobby") return;
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can shuffle teams.", code: "FORBIDDEN" });
+      return;
+    }
+    if (game.settings?.teamsLocked) return;
+    assignTeams(game);
+    console.log(`[Game ${instanceId}] Teams shuffled by host`);
+    broadcastGameState(instanceId, game);
+  });
+
+  // ── switch-team ────────────────────────────────────────────────────────────
+  // Allows a player to move themselves to a specific team in the lobby.
+  socket.on("switch-team", ({ instanceId, teamIndex }) => {
+    const { userId } = socket;
+    const game = getGame(instanceId);
+    if (!game || game.status !== "lobby") return;
+    if (game.settings?.teamsLocked) {
+      socket.emit("error", { message: "Teams are locked.", code: "FORBIDDEN" });
+      return;
+    }
+    if (teamIndex !== 0 && teamIndex !== 1) return;
+    const player = game.players.find(p => p.id === userId);
+    if (!player) return;
+    // Remove from current team tracking array
+    const oldIndex = player.teamIndex;
+    if (oldIndex !== null && oldIndex !== undefined && game.teams[oldIndex]) {
+      game.teams[oldIndex] = game.teams[oldIndex].filter(id => id !== userId);
+    }
+    player.teamIndex = teamIndex;
+    if (!game.teams[teamIndex]) game.teams[teamIndex] = [];
+    game.teams[teamIndex].push(userId);
+    console.log(`[Game ${instanceId}] ${socket.username} switched to team ${teamIndex}`);
+    broadcastGameState(instanceId, game);
+  });
+
+  // ── end-game ─────────────────────────────────────────────────────────────
+  // Host ends the in-progress game early and sends everyone to the results screen.
+  socket.on("end-game", ({ instanceId }) => {
+    const game = getGame(instanceId);
+    if (!game) return;
+    if (game.status !== "playing") return;
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can end the game.", code: "FORBIDDEN" });
+      return;
+    }
+    finalizeGame(game);
+    io.to(instanceId).emit("game-over", { scores: game.scores, winner: game.winner });
+    broadcastGameState(instanceId, game);
+    console.log(`[Game ${instanceId}] Game ended early by host`);
+  });
+
+  // ── reset-game ─────────────────────────────────────────────────────────────
+  // Resets a finished game back to a lobby with the same human players.
+  socket.on("reset-game", ({ instanceId }) => {
+    const game = getGame(instanceId);
+    if (!game) {
+      socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
+      return;
+    }
+    if (game.status !== "finished") {
+      socket.emit("error", { message: "Can only reset a finished game.", code: "INVALID_STATE" });
+      return;
+    }
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can start a new game.", code: "FORBIDDEN" });
+      return;
+    }
+
+    // Keep only the human players; drop bots and reset their cards
+    const survivors = game.players
+      .filter(p => !p.isBot)
+      .map(p => ({ ...p, hand: [], cardCount: 0, teamIndex: null }));
+
+    Object.assign(game, {
+      status:              'lobby',
+      players:             survivors,
+      spectators:          [],
+      teams:               [[], []],
+      currentTurnPlayerId: null,
+      lastQuestion:        null,
+      claimedHalfSuits:    [],
+      scores:              [0, 0],
+      forcedClaimTeam:     null,
+      eventLog:            [],
+      startedAt:           null,
+      finishedAt:          null,
+      // preserve settings and hostUserId
+    });
+
+    console.log(`[Game ${instanceId}] Game reset to lobby by host`);
+    broadcastGameState(instanceId, game);
+  });
+
+  // ── update-settings ────────────────────────────────────────────────────────
+  socket.on("update-settings", ({ instanceId, settings }) => {
+    const game = getGame(instanceId);
+    if (!game) {
+      socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
+      return;
+    }
+    if (game.status !== "lobby") {
+      socket.emit("error", { message: "Settings can only be changed in the lobby.", code: "INVALID_STATE" });
+      return;
+    }
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can change settings.", code: "FORBIDDEN" });
+      return;
+    }
+
+    // Whitelist known keys only to prevent pollution
+    const allowed = ['botDifficulty', 'botSpeed', 'turnTimeLimit', 'allowSpectators', 'teamsLocked'];
+    for (const key of allowed) {
+      if (settings[key] !== undefined) game.settings[key] = settings[key];
+    }
+
+    broadcastGameState(instanceId, game);
+  });
+
+  // ── kick-player ────────────────────────────────────────────────────────────
+  socket.on("kick-player", ({ instanceId, targetId }) => {
+    const game = getGame(instanceId);
+    if (!game) {
+      socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
+      return;
+    }
+    if (game.status !== "lobby") {
+      socket.emit("error", { message: "Can only kick players in the lobby.", code: "INVALID_STATE" });
+      return;
+    }
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can kick players.", code: "FORBIDDEN" });
+      return;
+    }
+    if (targetId === socket.userId) {
+      socket.emit("error", { message: "You cannot kick yourself.", code: "VALIDATION" });
+      return;
+    }
+
+    removePlayer(game, targetId);
+    io.to(`player:${targetId}:${instanceId}`).emit("kicked", { reason: "You were removed by the host." });
+    console.log(`[Game ${instanceId}] Player ${targetId} was kicked by host`);
+    broadcastGameState(instanceId, game);
+  });
+
+  // ── transfer-host ──────────────────────────────────────────────────────────
+  socket.on("transfer-host", ({ instanceId, newHostId }) => {
+    const game = getGame(instanceId);
+    if (!game) {
+      socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
+      return;
+    }
+    if (game.status !== "lobby") {
+      socket.emit("error", { message: "Can only transfer host in the lobby.", code: "INVALID_STATE" });
+      return;
+    }
+    if (game.hostUserId !== socket.userId) {
+      socket.emit("error", { message: "Only the host can transfer host.", code: "FORBIDDEN" });
+      return;
+    }
+    const newHost = game.players.find(p => p.id === newHostId && !p.isBot);
+    if (!newHost) {
+      socket.emit("error", { message: "Target player not found.", code: "NOT_FOUND" });
+      return;
+    }
+
+    game.hostUserId = newHostId;
+    console.log(`[Game ${instanceId}] Host transferred to ${newHost.username}`);
+    broadcastGameState(instanceId, game);
+  });
+
+  // ── spectate-bot-game (legacy — kept for session compatibility) ───────────
   socket.on("spectate-bot-game", ({ instanceId }) => {
     const { userId, username, avatarUrl } = socket;
     const game = getGame(instanceId);
@@ -380,13 +631,8 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Remove the human from the player list so all seats go to bots
     removePlayer(game, userId);
-
-    // Fill up to exactly 6 bots (minimum needed to start)
-    while (game.players.length < 6) {
-      addBotToGame(game);
-    }
+    while (game.players.length < 6) addBotToGame(game);
 
     try {
       startGame(game);
@@ -395,14 +641,12 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // Switch socket to spectator mode
     socket.isSpectator = true;
     socket.join(`spectators:${instanceId}`);
     addSpectator(game, { id: userId, username, avatarUrl });
 
-    console.log(`[Game ${instanceId}] Bot-only game started; ${username} is spectating`);
+    console.log(`[Game ${instanceId}] Bot-only game started (legacy); ${username} is spectating`);
     socket.emit("game-state", getSpectatorState(game));
-    // Notify any other sockets in the room (e.g. reconnecting sessions)
     broadcastGameState(instanceId, game);
   });
 
