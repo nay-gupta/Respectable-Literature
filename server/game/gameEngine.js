@@ -123,11 +123,17 @@ export function startGame(gameState) {
   if (unassigned.length > 0) {
     throw new Error(`${unassigned.length} player(s) are not assigned to a team.`);
   }
-  const teamA = gameState.players.filter(p => p.teamIndex === 0).length;
-  const teamB = gameState.players.filter(p => p.teamIndex === 1).length;
-  if (teamA !== teamB) {
-    throw new Error(`Teams must be equal size (${teamA}v${teamB}).`);
+  const teamACount = gameState.players.filter(p => p.teamIndex === 0).length;
+  const teamBCount = gameState.players.filter(p => p.teamIndex === 1).length;
+  if (teamACount !== teamBCount) {
+    throw new Error(`Teams must be equal size (${teamACount}v${teamBCount}).`);
   }
+
+  // Reorder players to alternate A, B, A, B, … around the table.
+  // Preserves each player's chosen teamIndex — only changes seat order.
+  const teamA = gameState.players.filter(p => p.teamIndex === 0);
+  const teamB = gameState.players.filter(p => p.teamIndex === 1);
+  gameState.players = teamA.flatMap((p, i) => [p, teamB[i]]);
 
   const hands = dealCards(count);
   gameState.players.forEach((player, i) => {

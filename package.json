@@ -1,0 +1,10 @@
+{
+  "name": "respectable-literature",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "cd server && npm install && npm start"
+  }
+}

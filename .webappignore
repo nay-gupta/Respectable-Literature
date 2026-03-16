@@ -1,0 +1,10 @@
+client/src/
+client/index.html
+client/vite.config.js
+client/package.json
+client/node_modules/
+server/node_modules/
+.git/
+*.md
+*.env
+example.env

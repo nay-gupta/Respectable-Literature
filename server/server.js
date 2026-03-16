@@ -28,10 +28,11 @@ dotenv.config({ path: "../.env" });
 
 const app = express();
 const httpServer = createServer(app);
-const port = 3001;
+const port = process.env.PORT || 3001;
+const isProd = process.env.NODE_ENV === 'production';
 
 const io = new SocketIOServer(httpServer, {
-  cors: {
+  cors: isProd ? {} : {
     origin: ["http://localhost:5173", "https://localhost:5173"],
     methods: ["GET", "POST"],
     credentials: true,
@@ -41,7 +42,23 @@ const io = new SocketIOServer(httpServer, {
 // Allow express to parse JSON bodies
 app.use(express.json());
 
-// ─── REST endpoints ────────────────────────────────────────────────────────────
+// ─── Serve built client in production ─────────────────────────────────────────
+
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+if (isProd) {
+  const clientDist = path.join(__dirname, '../client/dist');
+  app.use(express.static(clientDist));
+  // SPA fallback — serve index.html for any non-API/socket route
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
+      res.sendFile(path.join(clientDist, 'index.html'));
+    }
+  });
+}
 
 app.post("/api/token", async (req, res) => {
   // Exchange the code for an access_token.
@@ -804,5 +821,5 @@ io.on("connection", (socket) => {
 // ─── Start server ──────────────────────────────────────────────────────────────
 
 httpServer.listen(port, () => {
-  console.log(`Server listening at http://localhost:${port}`);
+  console.log(`Server listening at http://localhost:${port} (${isProd ? 'production' : 'development'})`);
 });
