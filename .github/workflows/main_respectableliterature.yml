@@ -25,6 +25,8 @@ jobs:
 
       - name: Install & build client
         working-directory: client
+        env:
+          VITE_DISCORD_CLIENT_ID: ${{ secrets.VITE_DISCORD_CLIENT_ID }}
         run: |
           npm ci
           npm run build
