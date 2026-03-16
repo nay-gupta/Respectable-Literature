@@ -13,6 +13,8 @@ let logOpen        = false;
 let unreadCount    = 0;
 let lastLogLength  = 0;
 let _animHandlersRegistered = false;
+let _timerInterval = null;
+let _inGameSettingsPanelOpen = false;
 
 // The log panel, backdrop, and toggle button live on document.body so they
 // are NEVER destroyed by container.innerHTML re-renders. Created once, reused forever.
@@ -91,11 +93,15 @@ export function renderGameBoard(container, state, localUserId) {
   registerAnimHandlers();
   ensureLogOverlay();
 
+  // Clear any running countdown — will be restarted below if needed
+  if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+
   const {
     players = [], currentTurnPlayerId,
     isSpectating = false, spectators = [],
     scores = [0, 0], claimedHalfSuits = [],
     eventLog = [], hostUserId = null,
+    turnTimerDeadline = null, settings = {},
   } = state;
 
   const localPlayer = players.find(p => p.id === localUserId);
@@ -127,7 +133,13 @@ export function renderGameBoard(container, state, localUserId) {
         ? `<span class="turn-label-you">\u2b50 Your turn!</span>`
         : `<span class="turn-label">${currentTurnPlayer.username}'s turn</span>`)
     : '';
-
+  // ── Turn timer chip ───────────────────────────────────────────────
+  const timerSecs = turnTimerDeadline
+    ? Math.max(0, Math.ceil((turnTimerDeadline - Date.now()) / 1000))
+    : 0;
+  const timerChipHtml = turnTimerDeadline
+    ? `<span id="turn-timer-chip" class="turn-timer-chip${timerSecs <= 5 ? ' turn-timer-urgent' : ''}">${timerSecs}s</span>`
+    : '';
   // ── DOM (no log panel here — it lives on body) ─────────────────────────
   container.innerHTML = `
     <div class="game-board${isSpectating ? ' spectator-mode' : ''}">
@@ -140,9 +152,10 @@ export function renderGameBoard(container, state, localUserId) {
             <span class="score-chip score-chip-b">${scores[1]}</span>
           </div>
         </div>
-        <div class="header-turn">${turnLabel}</div>
+        <div class="header-turn">${turnLabel}${timerChipHtml}</div>
         <div class="header-right">
-          ${spectators.length > 0 ? `<div class="spectator-count-chip">\ud83d\udc41 ${spectators.length}</div>` : ''}
+          ${spectators.length > 0 ? `<div class="spectator-count-chip">👁 ${spectators.length}</div>` : ''}
+          ${isHost ? `<button id="in-game-settings-btn" class="btn-icon" title="Game Settings">⚙</button>` : ''}
         </div>
       </div>
 
@@ -179,11 +192,42 @@ export function renderGameBoard(container, state, localUserId) {
                   ${isMyTurn ? '' : 'disabled'}>
             \ud83c\udccf Claim
           </button>
-          ${isHost ? `<button id="end-game-btn" class="btn btn-ghost end-game-btn">⏹ End Game</button>` : ''}
+          ${isHost ? `<button id="end-game-btn" class="btn btn-ghost end-game-btn" title="You are the host">👑 End Game</button>` : ''}
         </div>
       ` : `
         <div class="spectator-banner">\ud83d\udc41 You are spectating \u2014 sit back and enjoy!</div>
+        ${isHost ? `<div class="action-bar spectator-host-bar"><button id="end-game-btn" class="btn btn-ghost end-game-btn" title="You are the host">👑 End Game</button></div>` : ''}
       `}
+      ${isHost ? `
+        <div class="in-game-settings-panel${_inGameSettingsPanelOpen ? ' open' : ''}" id="in-game-settings-panel">
+          <div class="in-game-settings-header">
+            <span>⚙ Settings</span>
+            <button id="in-game-settings-close" class="log-close-btn">✕</button>
+          </div>
+          <label class="setting-row">
+            <span>Bot difficulty</span>
+            <div class="btn-group">
+              <button class="setting-btn ${settings.botDifficulty==='easy'?'active':''}" data-setting="botDifficulty" data-value="easy">Easy</button>
+              <button class="setting-btn ${settings.botDifficulty==='hard'?'active':''}" data-setting="botDifficulty" data-value="hard">Hard</button>
+            </div>
+          </label>
+          <label class="setting-row">
+            <span>Bot speed</span>
+            <div class="btn-group">
+              <button class="setting-btn ${settings.botSpeed==='slow'?'active':''}" data-setting="botSpeed" data-value="slow">Slow</button>
+              <button class="setting-btn ${settings.botSpeed==='fast'?'active':''}" data-setting="botSpeed" data-value="fast">Fast</button>
+            </div>
+          </label>
+          <label class="setting-row">
+            <span>Turn time limit</span>
+            <div class="btn-group">
+              <button class="setting-btn ${settings.turnTimeLimit===0?'active':''}" data-setting="turnTimeLimit" data-value="0">Off</button>
+              <button class="setting-btn ${settings.turnTimeLimit===30?'active':''}" data-setting="turnTimeLimit" data-value="30">30s</button>
+              <button class="setting-btn ${settings.turnTimeLimit===60?'active':''}" data-setting="turnTimeLimit" data-value="60">60s</button>
+            </div>
+          </label>
+        </div>
+      ` : ''}
     </div>
   `;
 
@@ -198,6 +242,39 @@ export function renderGameBoard(container, state, localUserId) {
 
   // Update the persistent log panel content (the panel element itself is untouched)
   renderEventLog(_logPanel.querySelector('#log-panel-content'), state, localUserId);
+
+  // ── Turn timer interval ────────────────────────────────────────────
+  if (turnTimerDeadline) {
+    const deadline = turnTimerDeadline;
+    _timerInterval = setInterval(() => {
+      const chip = container.querySelector('#turn-timer-chip');
+      if (!chip) { clearInterval(_timerInterval); _timerInterval = null; return; }
+      const secs = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      chip.textContent = `${secs}s`;
+      chip.classList.toggle('turn-timer-urgent', secs <= 5);
+      if (secs === 0) { clearInterval(_timerInterval); _timerInterval = null; }
+    }, 500);
+  }
+
+  // ── In-game settings panel ──────────────────────────────────────
+  if (isHost) {
+    container.querySelector('#in-game-settings-btn')?.addEventListener('click', () => {
+      _inGameSettingsPanelOpen = !_inGameSettingsPanelOpen;
+      container.querySelector('#in-game-settings-panel')?.classList.toggle('open', _inGameSettingsPanelOpen);
+    });
+    container.querySelector('#in-game-settings-close')?.addEventListener('click', () => {
+      _inGameSettingsPanelOpen = false;
+      container.querySelector('#in-game-settings-panel')?.classList.remove('open');
+    });
+    container.querySelector('#in-game-settings-panel')?.addEventListener('click', e => {
+      const btn = e.target.closest('[data-setting]');
+      if (!btn) return;
+      const key = btn.dataset.setting;
+      const raw = btn.dataset.value;
+      const value = raw !== undefined && !isNaN(raw) ? Number(raw) : raw;
+      socket.emit('update-settings', { instanceId: state.instanceId, settings: { [key]: value } });
+    });
+  }
 
   // ── Camera-tile ask ────────────────────────────────────────────────────
   container.querySelectorAll('[data-ask-target="1"]').forEach(seatEl => {

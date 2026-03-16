@@ -44,7 +44,9 @@ app.use(express.json());
 // ─── REST endpoints ────────────────────────────────────────────────────────────
 
 app.post("/api/token", async (req, res) => {
-  // Exchange the code for an access_token
+  // Exchange the code for an access_token.
+  // Note: redirect_uri is intentionally omitted — Discord Activities use an
+  // internal OAuth flow where no HTTP redirect occurs.
   const response = await fetch(`https://discord.com/api/oauth2/token`, {
     method: "POST",
     headers: {
@@ -58,13 +60,19 @@ app.post("/api/token", async (req, res) => {
     }),
   });
 
-  const { access_token } = await response.json();
-  res.send({ access_token });
+  const data = await response.json();
+  if (!response.ok) {
+    console.error("[/api/token] Discord returned error:", data);
+    return res.status(response.status).json({ error: data.error, error_description: data.error_description });
+  }
+  res.send({ access_token: data.access_token });
 });
 
 // ─── Helper: broadcast per-player state to entire room ────────────────────────
 
 function broadcastGameState(instanceId, gameState) {
+  // Update turn timer deadline BEFORE sending state so clients see the correct value
+  refreshTurnTimer(instanceId);
   for (const player of gameState.players) {
     if (player.isBot) continue; // bots have no socket
     const publicState = getPublicState(gameState, player.id);
@@ -77,6 +85,59 @@ function broadcastGameState(instanceId, gameState) {
   }
   // After every state change, schedule a bot move if it's a bot's turn
   scheduleBotTurn(instanceId);
+}
+
+// ─── Turn timer ──────────────────────────────────────────────────────────────
+
+const turnTimers = new Map(); // instanceId -> timeoutId
+
+/**
+ * Refreshes the turn countdown for the current player.
+ * Sets game.turnTimerDeadline (included in broadcast) and schedules a server
+ * timeout that auto-advances the turn when the limit expires.
+ * Called at the top of broadcastGameState so the deadline is always current.
+ */
+function refreshTurnTimer(instanceId) {
+  // Cancel any running countdown
+  if (turnTimers.has(instanceId)) {
+    clearTimeout(turnTimers.get(instanceId));
+    turnTimers.delete(instanceId);
+  }
+
+  const game = getGame(instanceId);
+  if (!game || game.status !== "playing") {
+    if (game) game.turnTimerDeadline = null;
+    return;
+  }
+
+  const limit = game.settings?.turnTimeLimit;
+  if (!limit || limit <= 0) {
+    game.turnTimerDeadline = null;
+    return;
+  }
+
+  const current = game.players.find(p => p.id === game.currentTurnPlayerId);
+  if (!current || current.isBot) {
+    game.turnTimerDeadline = null;
+    return;
+  }
+
+  // Stamp the deadline on the game object so it travels with the broadcast
+  const deadline = Date.now() + limit * 1000;
+  game.turnTimerDeadline = deadline;
+
+  const capturedPlayerId = current.id;
+  const capturedName = current.username;
+  const timer = setTimeout(() => {
+    turnTimers.delete(instanceId);
+    const g = getGame(instanceId);
+    if (!g || g.status !== "playing" || g.currentTurnPlayerId !== capturedPlayerId) return;
+    g.eventLog.push({ type: "turn_timeout", message: `${capturedName}'s time ran out!` });
+    advanceTurn(g);
+    broadcastGameState(instanceId, g);
+  }, limit * 1000);
+
+  turnTimers.set(instanceId, timer);
 }
 
 // ─── Bot turn scheduling ──────────────────────────────────────────────────────
@@ -206,11 +267,7 @@ io.on("connection", (socket) => {
     const forceSpectate = !isExistingPlayer && (game.status === "playing" || game.status === "finished");
 
     if (spectate || forceSpectate) {
-      if (!game.settings?.allowSpectators && !forceSpectate) {
-        socket.emit("error", { message: "Spectators are not allowed in this game.", code: "FORBIDDEN" });
-        return;
-      }
-      socket.isSpectator = true;
+        socket.isSpectator = true;
       socket.join(instanceId);
       socket.join(`spectators:${instanceId}`);
       addSpectator(game, { id: userId, username, avatarUrl });
@@ -418,7 +475,7 @@ io.on("connection", (socket) => {
 
     broadcastGameState(instanceId, game);
     // Resend lobby state with isSpectating so the client updates its view
-    socket.emit("game-state", { ...game, isSpectating: true });
+    socket.emit("game-state", { ...getSpectatorState(game), isSpectating: true });
     console.log(`[Game ${instanceId}] ${username} moved to spectators in lobby`);
   });
 
@@ -441,6 +498,9 @@ io.on("connection", (socket) => {
     socket.isSpectator = false;
 
     broadcastGameState(instanceId, game);
+    // Explicitly resend full player-view state to the rejoining socket so
+    // hostUserId is present (they may have received a spectator-stripped state).
+    socket.emit("game-state", getPublicState(game, userId));
     console.log(`[Game ${instanceId}] ${username} rejoined as player from spectators`);
   });
 
@@ -452,7 +512,6 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Only the host can shuffle teams.", code: "FORBIDDEN" });
       return;
     }
-    if (game.settings?.teamsLocked) return;
     assignTeams(game);
     console.log(`[Game ${instanceId}] Teams shuffled by host`);
     broadcastGameState(instanceId, game);
@@ -464,10 +523,6 @@ io.on("connection", (socket) => {
     const { userId } = socket;
     const game = getGame(instanceId);
     if (!game || game.status !== "lobby") return;
-    if (game.settings?.teamsLocked) {
-      socket.emit("error", { message: "Teams are locked.", code: "FORBIDDEN" });
-      return;
-    }
     if (teamIndex !== 0 && teamIndex !== 1) return;
     const player = game.players.find(p => p.id === userId);
     if (!player) return;
@@ -500,26 +555,34 @@ io.on("connection", (socket) => {
   });
 
   // ── reset-game ─────────────────────────────────────────────────────────────
-  // Resets a finished game back to a lobby with the same human players.
-  socket.on("reset-game", ({ instanceId }) => {
+  // Resets a playing or finished game back to a lobby with the same human players.
+  socket.on("reset-game", async ({ instanceId }) => {
     const game = getGame(instanceId);
     if (!game) {
       socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
       return;
     }
-    if (game.status !== "finished") {
-      socket.emit("error", { message: "Can only reset a finished game.", code: "INVALID_STATE" });
+    if (game.status === "lobby") {
+      // Already in the lobby — resync the client and do nothing
+      broadcastGameState(instanceId, game);
       return;
     }
     if (game.hostUserId !== socket.userId) {
-      socket.emit("error", { message: "Only the host can start a new game.", code: "FORBIDDEN" });
+      socket.emit("error", { message: "Only the host can go back to the lobby.", code: "FORBIDDEN" });
       return;
     }
 
-    // Keep only the human players; drop bots and reset their cards
-    const survivors = game.players
-      .filter(p => !p.isBot)
-      .map(p => ({ ...p, hand: [], cardCount: 0, teamIndex: null }));
+    // Collect survivors from BOTH players AND spectators (host may be spectating)
+    // Deduplicate by id in case anyone appears in both lists
+    const allHumans = [
+      ...game.players.filter(p => !p.isBot),
+      ...game.spectators,
+    ].filter((p, i, arr) => arr.findIndex(x => x.id === p.id) === i);
+
+    const survivors = allHumans.map(p => ({
+      ...p,
+      hand: [], cardCount: 0, teamIndex: null,
+    }));
 
     Object.assign(game, {
       status:              'lobby',
@@ -538,6 +601,17 @@ io.on("connection", (socket) => {
     });
 
     console.log(`[Game ${instanceId}] Game reset to lobby by host`);
+
+    // Fix socket room memberships — everyone in the instance becomes a player again
+    const socketsInRoom = await io.in(instanceId).fetchSockets();
+    for (const s of socketsInRoom) {
+      const uid = s.userId;
+      if (!uid) continue;
+      s.leave(`spectators:${instanceId}`);
+      s.join(`player:${uid}:${instanceId}`);
+      s.isSpectator = false;
+    }
+
     broadcastGameState(instanceId, game);
   });
 
@@ -548,8 +622,8 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Game not found.", code: "NOT_FOUND" });
       return;
     }
-    if (game.status !== "lobby") {
-      socket.emit("error", { message: "Settings can only be changed in the lobby.", code: "INVALID_STATE" });
+    if (game.status !== "lobby" && game.status !== "playing") {
+      socket.emit("error", { message: "Settings can only be changed in the lobby or during a game.", code: "INVALID_STATE" });
       return;
     }
     if (game.hostUserId !== socket.userId) {
@@ -558,7 +632,7 @@ io.on("connection", (socket) => {
     }
 
     // Whitelist known keys only to prevent pollution
-    const allowed = ['botDifficulty', 'botSpeed', 'turnTimeLimit', 'allowSpectators', 'teamsLocked'];
+    const allowed = ['botDifficulty', 'botSpeed', 'turnTimeLimit'];
     for (const key of allowed) {
       if (settings[key] !== undefined) game.settings[key] = settings[key];
     }
@@ -683,15 +757,46 @@ io.on("connection", (socket) => {
 
     if (game.status === "lobby") {
       removePlayer(game, userId);
+
+      // Reassign host if the disconnecting player was the host
+      if (game.hostUserId === userId) {
+        const nextHuman = game.players.find(p => !p.isBot);
+        if (nextHuman) {
+          game.hostUserId = nextHuman.id;
+          console.log(`[Game ${instanceId}] Host transferred to ${nextHuman.username} after disconnect`);
+        } else {
+          // No humans left — delete the game
+          deleteGame(instanceId);
+          console.log(`[Game ${instanceId}] Deleted: no humans remain after host disconnect`);
+          return;
+        }
+      }
+
       broadcastGameState(instanceId, game);
       if (game.players.length === 0) {
         deleteGame(instanceId);
       }
     } else if (game.status === "playing") {
+      // Reassign host if needed
+      if (game.hostUserId === userId) {
+        const nextHuman = game.players.find(p => !p.isBot && p.id !== userId);
+        if (nextHuman) {
+          game.hostUserId = nextHuman.id;
+          console.log(`[Game ${instanceId}] Host transferred to ${nextHuman.username} during game`);
+        } else {
+          // No humans left — end the game
+          finalizeGame(game);
+          io.to(instanceId).emit("game-over", { scores: game.scores, winner: game.winner });
+          broadcastGameState(instanceId, game);
+          console.log(`[Game ${instanceId}] Game ended: no humans remain`);
+          return;
+        }
+      }
+
       if (game.currentTurnPlayerId === userId) {
         advanceTurn(game);
-        broadcastGameState(instanceId, game);
       }
+      broadcastGameState(instanceId, game);
     }
   });
 });

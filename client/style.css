@@ -159,7 +159,11 @@ html, body {
   align-items: center;
   flex-wrap: wrap;
   justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
 }
+
+.settings-panel { width: 100%; box-sizing: border-box; }
 
 .lobby-hint, .lobby-waiting { color: var(--text-muted); font-size: 13px; text-align: center; }
 
@@ -185,6 +189,7 @@ html, body {
 }
 
 .you-badge { color: var(--text-muted); font-size: 11px; }
+.host-badge { font-size: 12px; }
 
 .bot-badge {
   background: var(--bg-elevated);
@@ -348,6 +353,14 @@ html, body {
   color: var(--text-muted);
   flex-shrink: 0;
 }
+.spectator-host-bar {
+  display: flex;
+  justify-content: center;
+  padding: 6px 16px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
 
 /* When watching, event log fills remaining space */
 .spectator-mode .event-log-area {
@@ -454,6 +467,63 @@ html, body {
 
 .turn-label      { color: var(--text-muted); }
 .turn-label-you  { color: var(--gold); font-weight: 700; }
+
+/* Turn timer chip next to the turn label */
+.turn-timer-chip {
+  display: inline-block;
+  margin-left: 6px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  vertical-align: middle;
+  transition: background 0.3s, color 0.3s;
+}
+.turn-timer-urgent {
+  background: rgba(220, 60, 60, 0.3);
+  color: #f88;
+}
+
+/* Gear icon button in header */
+.btn-icon {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  padding: 3px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  font-family: inherit;
+}
+.btn-icon:hover { background: var(--bg-elevated); color: var(--text); }
+
+/* In-game settings panel — floats above the action bar */
+.in-game-settings-panel {
+  display: none;
+  position: absolute;
+  bottom: 60px;
+  right: 12px;
+  z-index: 200;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  min-width: 240px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+.in-game-settings-panel.open { display: block; }
+.in-game-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
 
 .spectator-count-chip {
   margin-left: auto;
@@ -1125,6 +1195,29 @@ html, body {
 .waiting-text { color: var(--text-muted); font-style: italic; font-size: 13px; }
 .results-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 
+
+/* Reconnect banner */
+.reconnect-banner {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(0,0,0,0.82);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  font-size: 13px;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.reconnect-banner.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
 
 /* Toast */
 .toast {

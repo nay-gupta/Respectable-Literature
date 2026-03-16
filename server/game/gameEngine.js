@@ -24,8 +24,6 @@ export function createGame(instanceId) {
       botDifficulty:   'easy',
       botSpeed:        'slow',
       turnTimeLimit:   0,
-      allowSpectators: true,
-      teamsLocked:     false,
     },
   };
 }
@@ -120,19 +118,15 @@ export function startGame(gameState) {
     throw new Error(`Need exactly 6 or 8 players to start (have ${count})`);
   }
 
-  if (!gameState.settings?.teamsLocked) {
-    assignTeams(gameState);
-  } else {
-    // When teams are locked, verify everyone is assigned and teams are equal
-    const unassigned = gameState.players.filter(p => p.teamIndex !== 0 && p.teamIndex !== 1);
-    if (unassigned.length > 0) {
-      throw new Error(`${unassigned.length} player(s) are not assigned to a team.`);
-    }
-    const teamA = gameState.players.filter(p => p.teamIndex === 0).length;
-    const teamB = gameState.players.filter(p => p.teamIndex === 1).length;
-    if (teamA !== teamB) {
-      throw new Error(`Teams must be equal size (${teamA}v${teamB}).`);
-    }
+  // Always respect lobby team choices — verify everyone is assigned and teams are equal
+  const unassigned = gameState.players.filter(p => p.teamIndex !== 0 && p.teamIndex !== 1);
+  if (unassigned.length > 0) {
+    throw new Error(`${unassigned.length} player(s) are not assigned to a team.`);
+  }
+  const teamA = gameState.players.filter(p => p.teamIndex === 0).length;
+  const teamB = gameState.players.filter(p => p.teamIndex === 1).length;
+  if (teamA !== teamB) {
+    throw new Error(`Teams must be equal size (${teamA}v${teamB}).`);
   }
 
   const hands = dealCards(count);
@@ -455,6 +449,7 @@ export function finalizeGame(gameState) {
 export function getPublicState(gameState, forPlayerId) {
   return {
     ...gameState,
+    isSpectating: false,
     players: gameState.players.map(p => {
       if (p.id === forPlayerId) {
         return { ...p }; // include full hand for this player

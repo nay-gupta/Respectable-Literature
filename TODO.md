@@ -9,7 +9,7 @@
 
 ## Big changes
 
-1. What happens when a player leaves the activity and relaunches?
+1. What happens when a player leaves the activity and relaunches while the activity is still going with other players?
 2. Ability to spectate a game that has already started
 
 ## Finalization

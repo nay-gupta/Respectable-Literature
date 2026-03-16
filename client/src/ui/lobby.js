@@ -27,8 +27,6 @@ export function renderLobby(container, state, localUserOrId) {
     botDifficulty:   settings.botDifficulty   ?? 'easy',
     botSpeed:        settings.botSpeed        ?? 'slow',
     turnTimeLimit:   settings.turnTimeLimit   ?? 0,
-    allowSpectators: settings.allowSpectators ?? true,
-    teamsLocked:     settings.teamsLocked     ?? false,
   };
 
   const assignedCount = players.filter(p => p.teamIndex === 0 || p.teamIndex === 1).length;
@@ -84,16 +82,6 @@ export function renderLobby(container, state, localUserOrId) {
           </div>
         </label>
 
-        <label class="setting-row">
-          <span>Allow spectators</span>
-          <input type="checkbox" class="setting-checkbox" id="allow-spectators-toggle" ${s.allowSpectators ? 'checked' : ''} />
-        </label>
-
-        <label class="setting-row">
-          <span>Lock teams</span>
-          <input type="checkbox" class="setting-checkbox" id="teams-locked-toggle" ${s.teamsLocked ? 'checked' : ''} />
-        </label>
-
       </div>
     </details>
   ` : '';
@@ -102,7 +90,7 @@ export function renderLobby(container, state, localUserOrId) {
   const hostActionsHtml = isHost ? `
     <div class="lobby-actions">
       ${isPlayer ? `
-        <button id="shuffle-teams-btn" class="btn btn-ghost" ${s.teamsLocked ? 'disabled title="Teams are locked"' : ''}>
+        <button id="shuffle-teams-btn" class="btn btn-ghost">
           🔀 Shuffle Teams
         </button>
       ` : ''}
@@ -153,24 +141,24 @@ export function renderLobby(container, state, localUserOrId) {
         <div class="team team-a">
           <div class="team-header">
             <h3 class="team-label">Team A 🔵</h3>
-            ${isPlayer && !s.teamsLocked ? (localPlayerTeam === 0
+            ${isPlayer ? (localPlayerTeam === 0
               ? `<span class="team-joined-badge">✓ You're here</span>`
               : `<button class="join-team-btn" data-team-index="0">Join</button>`) : ''}
           </div>
           <ul class="player-list-lobby">
-            ${teamA.map(p => playerItemHtml(p, localUserId, isHost)).join('')}
+            ${teamA.map(p => playerItemHtml(p, localUserId, isHost, hostUserId)).join('')}
             ${teamA.length === 0 ? '<li class="empty-slot">No players yet</li>' : ''}
           </ul>
         </div>
         <div class="team team-b">
           <div class="team-header">
             <h3 class="team-label">Team B 🔴</h3>
-            ${isPlayer && !s.teamsLocked ? (localPlayerTeam === 1
+            ${isPlayer ? (localPlayerTeam === 1
               ? `<span class="team-joined-badge">✓ You're here</span>`
               : `<button class="join-team-btn" data-team-index="1">Join</button>`) : ''}
           </div>
           <ul class="player-list-lobby">
-            ${teamB.map(p => playerItemHtml(p, localUserId, isHost)).join('')}
+            ${teamB.map(p => playerItemHtml(p, localUserId, isHost, hostUserId)).join('')}
             ${teamB.length === 0 ? '<li class="empty-slot">No players yet</li>' : ''}
           </ul>
         </div>
@@ -180,7 +168,7 @@ export function renderLobby(container, state, localUserOrId) {
       <div class="unassigned-section">
         <h4 class="unassigned-heading">No team yet</h4>
         <ul class="player-list-lobby">
-          ${unassigned.map(p => playerItemHtml(p, localUserId, isHost)).join('')}
+          ${unassigned.map(p => playerItemHtml(p, localUserId, isHost, hostUserId)).join('')}
         </ul>
       </div>` : ''}
 
@@ -207,7 +195,7 @@ export function renderLobby(container, state, localUserOrId) {
     });
 
     container.querySelector('#shuffle-teams-btn')?.addEventListener('click', () => {
-      if (!s.teamsLocked) emit('shuffle-teams', { instanceId });
+      emit('shuffle-teams', { instanceId });
     });
 
     container.querySelector('#add-bot-btn')?.addEventListener('click', () => {
@@ -245,13 +233,7 @@ export function renderLobby(container, state, localUserOrId) {
       emit('update-settings', { instanceId, settings: { [key]: value } });
     });
 
-    container.querySelector('#allow-spectators-toggle')?.addEventListener('change', e => {
-      emit('update-settings', { instanceId, settings: { allowSpectators: e.target.checked } });
-    });
 
-    container.querySelector('#teams-locked-toggle')?.addEventListener('change', e => {
-      emit('update-settings', { instanceId, settings: { teamsLocked: e.target.checked } });
-    });
   }
 
   // Watch-self: move local player to spectators
@@ -282,8 +264,9 @@ export function renderLobby(container, state, localUserOrId) {
   });
 }
 
-function playerItemHtml(player, localUserId, isHost = false) {
+function playerItemHtml(player, localUserId, isHost = false, hostUserId = null) {
   const isYou = player.id === localUserId;
+  const isHostPlayer = player.id === hostUserId;
   const avatarEl = player.isBot
     ? `<div class="player-avatar-sm avatar-placeholder">🤖</div>`
     : player.avatarUrl
@@ -292,7 +275,7 @@ function playerItemHtml(player, localUserId, isHost = false) {
 
   const label = player.isBot
     ? `<span class="player-name">${player.username} <span class="bot-badge">BOT</span></span>`
-    : `<span class="player-name">${player.username}${isYou ? ' <span class="you-badge">(you)</span>' : ''}</span>`;
+    : `<span class="player-name">${player.username}${isYou ? ' <span class="you-badge">(you)</span>' : ''}${isHostPlayer ? ' <span class="host-badge">👑</span>' : ''}</span>`;
 
   // Watch button: shown on the local human player's own row
   const watchBtn = (!player.isBot && isYou)

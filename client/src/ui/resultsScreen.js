@@ -71,8 +71,7 @@ export function renderResultsScreen(container, state, localUserId) {
 
       ${isHost
         ? `<div class="results-actions">
-             <button id="play-again-btn" class="btn btn-primary">▶ Play Again</button>
-             <button id="go-lobby-btn" class="btn btn-ghost">🏠 Go to Lobby</button>
+             <button id="go-lobby-btn" class="btn btn-primary">🏠 Go to Lobby</button>
            </div>`
         : `<div class="results-actions">
              <p class="waiting-text">Waiting for the host to start a new game…</p>
@@ -84,9 +83,6 @@ export function renderResultsScreen(container, state, localUserId) {
   // Confetti for the winner
   if (winner !== null) spawnConfetti(container, winner);
 
-  container.querySelector('#play-again-btn')?.addEventListener('click', () => {
-    emit('reset-game', { instanceId });
-  });
   container.querySelector('#go-lobby-btn')?.addEventListener('click', () => {
     emit('reset-game', { instanceId });
   });
